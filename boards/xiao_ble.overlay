@@ -1,0 +1,23 @@
+
+/ {
+	leds {
+		customled: custom-led {
+			gpios = <&gpio0 29 0>;
+			label = "Custom LED";
+		};
+	};
+
+	aliases {
+		customled = &customled;
+		custombutton = &custombutton;
+	};
+
+	buttons {
+		compatible = "gpio-keys";
+		custombutton: custom-button {
+			gpios = <&gpio0 28 GPIO_PULL_DOWN>;
+			label = "custom Button";		
+		};
+		debounce-interval-ms = <5000>;
+	};
+};
