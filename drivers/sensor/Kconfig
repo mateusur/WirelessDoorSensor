@@ -1,0 +1,3 @@
+if SENSOR
+rsource "sensirion/Kconfig"
+endif # SENSOR
