@@ -1,0 +1,7 @@
+config SHT21
+	bool "SHT21 Temperature and Humidity Sensor"
+	default n
+	depends on DT_HAS_SENSIRION_SHT21_ENABLED
+	select I2C
+	help
+	  Enable driver for SHT21 temperature and humidity sensor.
