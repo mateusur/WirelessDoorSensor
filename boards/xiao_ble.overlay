@@ -10,6 +10,7 @@
 	aliases {
 		customled = &customled;
 		custombutton = &custombutton;
+		temp = &{/soc/i2c@40004000/sht22@40/};
 	};
 
 	buttons {
@@ -21,3 +22,13 @@
 		debounce-interval-ms = <5000>;
 	};
 };
+
+&i2c1 {
+	// status = "okay";
+	sht22@40 {
+		compatible = "sensirion,sht22";
+		reg = <0x40>;
+		status = "okay";
+	};
+};
+
