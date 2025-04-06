@@ -6,7 +6,11 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gap.h>
+#include <zephyr/bluetooth/gatt.h>
+#include <zephyr/bluetooth/uuid.h>
+#include <zephyr/bluetooth/addr.h>
 
 LOG_MODULE_REGISTER(Lesson2_Exercise1, LOG_LEVEL_INF);
 
@@ -24,10 +28,52 @@ const struct device *const dev = DEVICE_DT_GET(TEMP_SENSOR);
 
 static struct gpio_callback button_cb_data;
 
+struct bt_conn *my_conn = NULL;
+
+static const struct bt_le_adv_param *adv_param = BT_LE_ADV_PARAM(
+	(BT_LE_ADV_OPT_CONNECTABLE |
+	 BT_LE_ADV_OPT_USE_IDENTITY), /* Connectable advertising and use identity address */
+	BT_GAP_ADV_FAST_INT_MIN_1, /* 0x30 units, 48 units, 30ms */
+	BT_GAP_ADV_FAST_INT_MAX_1, /* 0x60 units, 96 units, 60ms */
+	NULL); /* Set to NULL for undirected advertising */
+
+void on_connected(struct bt_conn *conn, uint8_t err)
+{
+    if (err) {
+        LOG_ERR("Connection error %d", err);
+        return;
+    }
+    LOG_INF("Connected");
+    my_conn = bt_conn_ref(conn);
+
+    /* STEP 3.2  Turn the connection status LED on */
+	gpio_pin_toggle_dt(&custom_led);
+}
+
+void on_disconnected(struct bt_conn *conn, uint8_t reason)
+{
+    LOG_INF("Disconnected. Reason %d", reason);
+    bt_conn_unref(my_conn);
+
+    /* STEP 3.3  Turn the connection status LED off */
+	gpio_pin_toggle_dt(&custom_led);
+}
+
+struct bt_conn_cb connection_callbacks = {
+    .connected              = on_connected,
+    .disconnected           = on_disconnected,
+};
+
+/* STEP 2.2 - Declare the structure for your custom data  */
+typedef struct adv_sensor_data {
+	int32_t temperature; 
+	uint16_t humidity; 
+} adv_sensor_data_type;
+
+static adv_sensor_data_type adv_sensor_data = { 0, 0 };
+
 static const struct bt_data ad[] = {
-	/* STEP 4.1.2 - Set the advertising flags */
-	BT_DATA_BYTES(BT_DATA_FLAGS, BT_LE_AD_NO_BREDR),
-	/* STEP 4.1.3 - Set the advertising packet data  */
+	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
 	BT_DATA(BT_DATA_NAME_COMPLETE, DEVICE_NAME, DEVICE_NAME_LEN),
 };
 
@@ -110,6 +156,23 @@ int main(void)
 	LOG_INF("Error while fetching1");
 	LOG_ERR("Error while fetching2");
 
+
+	err = bt_enable(NULL);
+	if (err)
+	{
+		LOG_ERR("Bluetooth init failed (err %d)\n", err);
+		return -1;
+	}
+	LOG_INF("Bluetooth initialized\n");
+
+	err = bt_le_adv_start(BT_LE_ADV_NCONN, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+	if (err)
+	{
+		LOG_ERR("Advertising failed to start (err %d)\n", err);
+		return -1;
+	}
+	LOG_INF("Advertising successfully started\n");
+
 	while (1)
 	{
 		err = sensor_sample_fetch(dev);
@@ -127,27 +190,14 @@ int main(void)
 		printk("Humidity sensor_channel_get failed ret %d\n", err);
 			return;
 		}
+		adv_sensor_data.humidity = humidity_value.val1 * 100 + humidity_value.val2;
+		adv_sensor_data.temperature = temp_value.val1 * 100 + temp_value.val2;
 		printk("temp: %d.%d °C \t humidity is %d.%d%% \n", temp_value.val1,
 					  temp_value.val2,humidity_value.val1, humidity_value.val2);
+		bt_le_adv_update_data(ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 		k_msleep(1000);
+		
 	}
-	// err = bt_enable(NULL);
-	// if (err)
-	// {
-	// 	LOG_ERR("Bluetooth init failed (err %d)\n", err);
-	// 	return -1;
-	// }
-	// LOG_INF("Bluetooth initialized\n");
-
-	// err = bt_le_adv_start(BT_LE_ADV_NCONN, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
-	// if (err)
-	// {
-	// 	LOG_ERR("Advertising failed to start (err %d)\n", err);
-	// 	return -1;
-	// }
-	// LOG_INF("Advertising successfully started\n");
-
-	
 
 	return 0;
 }
