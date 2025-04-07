@@ -12,7 +12,7 @@
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/bluetooth/addr.h>
 
-LOG_MODULE_REGISTER(Lesson2_Exercise1, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(WirelessDoorSensor, LOG_LEVEL_INF);
 
 #define SLEEP_TIME_MS 100
 #define CUSTOM_LED DT_ALIAS(customled)
@@ -21,6 +21,14 @@ LOG_MODULE_REGISTER(Lesson2_Exercise1, LOG_LEVEL_INF);
 
 #define DEVICE_NAME CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
+
+#define BT_UUID_MY_SERVICE_VALUE BT_UUID_128_ENCODE(0xc504356a,0x8d14,0x480b,0x8fca,0x09800799ccf1)
+#define BT_UUID_MY_SERVICE BT_UUID_DECLARE_128(BT_UUID_MY_SERVICE_VALUE)
+
+#define BT_UUID_MY_TEMPERATURE_VALUE BT_UUID_128_ENCODE(0xc504356a,0x8d14,0x480b,0x8fca,0x09800799ccf2)
+#define BT_UUID_MY_TEMPERATURE BT_UUID_DECLARE_128(BT_UUID_MY_TEMPERATURE_VALUE)
+
+
 
 static const struct gpio_dt_spec custom_led = GPIO_DT_SPEC_GET(CUSTOM_LED, gpios);
 static const struct gpio_dt_spec custom_button = GPIO_DT_SPEC_GET(CUSTOM_BUTTON, gpios);
@@ -77,14 +85,20 @@ static const struct bt_data ad[] = {
 	BT_DATA(BT_DATA_NAME_COMPLETE, DEVICE_NAME, DEVICE_NAME_LEN),
 };
 
-static unsigned char url_data[] = {0x17, '/', '/', 'a', 'c', 'a', 'd', 'e', 'm', 'y', '.',
-	'n', 'o', 'r', 'd', 'i', 'c', 's', 'e', 'm', 'i', '.',
-	'c', 'o', 'm'};
+ssize_t my_read_temperature(struct bt_conn *conn,
+                            const struct bt_gatt_attr *attr, void *buf,
+                            uint16_t len, uint16_t offset){
+    bt_gatt_attr_read(conn, attr, buf, len, offset,
+                      &adv_sensor_data.temperature,
+                      sizeof(adv_sensor_data.temperature));
 
-static const struct bt_data sd[] = {
-	/* 4.2.3 Include the URL data in the scan response packet*/
-	BT_DATA(BT_DATA_URI, url_data, sizeof(url_data)),
-};
+}
+
+BT_GATT_SERVICE_DEFINE(
+    custom_service, BT_GATT_PRIMARY_SERVICE(BT_UUID_MY_SERVICE),
+    BT_GATT_CHARACTERISTIC(BT_UUID_MY_TEMPERATURE, BT_GATT_CHRC_READ,
+                           BT_GATT_PERM_READ, my_read_temperature, NULL, NULL));
+
 
 bool led_init(void)
 {
@@ -95,33 +109,33 @@ bool led_init(void)
 	{
 		return 0;
 	}
-	if (!gpio_is_ready_dt(&custom_button))
-	{
-		return 0;
-	}
+	// if (!gpio_is_ready_dt(&custom_button))
+	// {
+	// 	return 0;
+	// }
 
 	ret = gpio_pin_configure_dt(&custom_led, GPIO_OUTPUT_ACTIVE);
 	if (ret < 0)
 	{
 		return 0;
 	}
-	ret = gpio_pin_configure_dt(&custom_button, GPIO_INT_EDGE_TO_ACTIVE);
-	if (ret < 0)
-	{
-		return 0;
-	}
-	while (1)
-	{
-		ret = gpio_pin_toggle_dt(&custom_led);
-		if (ret < 0)
-		{
-			return 0;
-		}
+	// ret = gpio_pin_configure_dt(&custom_button, GPIO_INT_EDGE_TO_ACTIVE);
+	// if (ret < 0)
+	// {
+	// 	return 0;
+	// }
+	// while (1)
+	// {
+	// 	ret = gpio_pin_toggle_dt(&custom_led);
+	// 	if (ret < 0)
+	// 	{
+	// 		return 0;
+	// 	}
 
-		led_state = !led_state;
-		printf("LED state: %s\n", led_state ? "ON" : "OFF");
-		k_msleep(SLEEP_TIME_MS);
-	}
+	// 	led_state = !led_state;
+	// 	printf("LED state: %s\n", led_state ? "ON" : "OFF");
+	// 	k_msleep(SLEEP_TIME_MS);
+	// }
 }
 
 void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
@@ -140,12 +154,11 @@ int main(void)
 	__ASSERT(device_is_ready(dev), "Device %s is not ready", dev->name);
 	printk("device is %p, name is %s\n", dev, dev->name);
 
-	// do_main(dev);
 
-	// device_is_ready(custom_led.port);
+	device_is_ready(custom_led.port);
 	// device_is_ready(custom_button.port);
 
-	// gpio_pin_configure_dt(&custom_led, GPIO_OUTPUT_ACTIVE);
+	gpio_pin_configure_dt(&custom_led, GPIO_OUTPUT_ACTIVE);
 	// gpio_pin_configure_dt(&custom_button, GPIO_INPUT);
 	
 	// gpio_pin_interrupt_configure_dt(&custom_button, GPIO_INT_EDGE_TO_ACTIVE);
@@ -153,10 +166,11 @@ int main(void)
 	// gpio_add_callback(custom_button.port, &button_cb_data);
 	// gpio_add_callback_dt(&custom_button, &button_cb_data);
 	int err;
-	LOG_INF("Error while fetching1");
-	LOG_ERR("Error while fetching2");
 
-
+	err = bt_conn_cb_register(&connection_callbacks);
+	if (err) {
+		LOG_ERR("Connection callback register failed (err %d)", err);
+    }
 	err = bt_enable(NULL);
 	if (err)
 	{
@@ -165,13 +179,14 @@ int main(void)
 	}
 	LOG_INF("Bluetooth initialized\n");
 
-	err = bt_le_adv_start(BT_LE_ADV_NCONN, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+	err = bt_le_adv_start(adv_param, ad, ARRAY_SIZE(ad), NULL ,0);
 	if (err)
 	{
 		LOG_ERR("Advertising failed to start (err %d)\n", err);
 		return -1;
 	}
 	LOG_INF("Advertising successfully started\n");
+	bt_conn_cb_register(&connection_callbacks);
 
 	while (1)
 	{
@@ -194,7 +209,7 @@ int main(void)
 		adv_sensor_data.temperature = temp_value.val1 * 100 + temp_value.val2;
 		printk("temp: %d.%d °C \t humidity is %d.%d%% \n", temp_value.val1,
 					  temp_value.val2,humidity_value.val1, humidity_value.val2);
-		bt_le_adv_update_data(ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+		bt_le_adv_update_data(ad, ARRAY_SIZE(ad), NULL,0);
 		k_msleep(1000);
 		
 	}
