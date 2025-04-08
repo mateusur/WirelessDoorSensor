@@ -9,6 +9,7 @@
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gap.h>
 #include <zephyr/bluetooth/gatt.h>
+#include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/bluetooth/addr.h>
 
@@ -28,7 +29,8 @@ LOG_MODULE_REGISTER(WirelessDoorSensor, LOG_LEVEL_INF);
 #define BT_UUID_MY_TEMPERATURE_VALUE BT_UUID_128_ENCODE(0xc504356a,0x8d14,0x480b,0x8fca,0x09800799ccf2)
 #define BT_UUID_MY_TEMPERATURE BT_UUID_DECLARE_128(BT_UUID_MY_TEMPERATURE_VALUE)
 
-
+#define BT_UUID_MY_HUMIDITY_VALUE BT_UUID_128_ENCODE(0xc504356a,0x8d14,0x480b,0x8fca,0x09800799ccf3)
+#define BT_UUID_MY_HUMIDITY BT_UUID_DECLARE_128(BT_UUID_MY_HUMIDITY_VALUE)
 
 static const struct gpio_dt_spec custom_led = GPIO_DT_SPEC_GET(CUSTOM_LED, gpios);
 static const struct gpio_dt_spec custom_button = GPIO_DT_SPEC_GET(CUSTOM_BUTTON, gpios);
@@ -38,12 +40,19 @@ static struct gpio_callback button_cb_data;
 
 struct bt_conn *my_conn = NULL;
 
+static bool notify_mytemperature_enabled;
+
+static struct bt_gatt_indicate_params ind_params;
+
+
 static const struct bt_le_adv_param *adv_param = BT_LE_ADV_PARAM(
 	(BT_LE_ADV_OPT_CONNECTABLE |
 	 BT_LE_ADV_OPT_USE_IDENTITY), /* Connectable advertising and use identity address */
 	BT_GAP_ADV_FAST_INT_MIN_1, /* 0x30 units, 48 units, 30ms */
 	BT_GAP_ADV_FAST_INT_MAX_1, /* 0x60 units, 96 units, 60ms */
 	NULL); /* Set to NULL for undirected advertising */
+
+
 
 void on_connected(struct bt_conn *conn, uint8_t err)
 {
@@ -56,6 +65,7 @@ void on_connected(struct bt_conn *conn, uint8_t err)
 
     /* STEP 3.2  Turn the connection status LED on */
 	gpio_pin_toggle_dt(&custom_led);
+	// gpio_pin_set_dt(&custom_led,1);
 }
 
 void on_disconnected(struct bt_conn *conn, uint8_t reason)
@@ -65,6 +75,8 @@ void on_disconnected(struct bt_conn *conn, uint8_t reason)
 
     /* STEP 3.3  Turn the connection status LED off */
 	gpio_pin_toggle_dt(&custom_led);
+	// gpio_pin_set_dt(&custom_led,0);
+
 }
 
 struct bt_conn_cb connection_callbacks = {
@@ -85,21 +97,37 @@ static const struct bt_data ad[] = {
 	BT_DATA(BT_DATA_NAME_COMPLETE, DEVICE_NAME, DEVICE_NAME_LEN),
 };
 
-ssize_t my_read_temperature(struct bt_conn *conn,
-                            const struct bt_gatt_attr *attr, void *buf,
-                            uint16_t len, uint16_t offset){
-    bt_gatt_attr_read(conn, attr, buf, len, offset,
-                      &adv_sensor_data.temperature,
-                      sizeof(adv_sensor_data.temperature));
-
+ssize_t my_read_temperature(struct bt_conn *conn,const struct bt_gatt_attr *attr, void *buf,uint16_t len, uint16_t offset){
+    return bt_gatt_attr_read(conn, attr, buf, len, offset,&adv_sensor_data.temperature,sizeof(adv_sensor_data.temperature));
 }
 
+ssize_t my_read_humidity(struct bt_conn *conn,const struct bt_gatt_attr *attr, void *buf,uint16_t len, uint16_t offset){
+    return bt_gatt_attr_read(conn, attr, buf, len, offset,&adv_sensor_data.humidity,sizeof(adv_sensor_data.humidity));
+}
+
+static void mylbsbc_ccc_temperature_changed(const struct bt_gatt_attr *attr,uint16_t value){
+	notify_mytemperature_enabled = (value == BT_GATT_CCC_NOTIFY);
+	LOG_INF("Notification %s", notify_mytemperature_enabled ? "enabled" : "disabled");
+}
+
+
 BT_GATT_SERVICE_DEFINE(
-    custom_service, BT_GATT_PRIMARY_SERVICE(BT_UUID_MY_SERVICE),
-    BT_GATT_CHARACTERISTIC(BT_UUID_MY_TEMPERATURE, BT_GATT_CHRC_READ,
-                           BT_GATT_PERM_READ, my_read_temperature, NULL, NULL));
+    custom_service,
+	BT_GATT_PRIMARY_SERVICE(BT_UUID_MY_SERVICE),
+	BT_GATT_CHARACTERISTIC(BT_UUID_MY_TEMPERATURE, BT_GATT_CHRC_READ|BT_GATT_CHRC_NOTIFY,BT_GATT_PERM_READ, my_read_temperature, NULL, NULL),
+	BT_GATT_CCC(mylbsbc_ccc_temperature_changed,BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+	BT_GATT_CHARACTERISTIC(BT_UUID_MY_HUMIDITY, BT_GATT_CHRC_READ,BT_GATT_PERM_READ, my_read_humidity, NULL, NULL),
+);
 
+int my_lbs_send_temp_notify(uint32_t temp_value)
+{
+	if (!notify_mytemperature_enabled) {
+		LOG_ERR("notify_mytemperature_enabled is not enabled/set");
+		return -EACCES;
+	}
 
+	return bt_gatt_notify(NULL, &custom_service.attrs[2],&temp_value,sizeof(temp_value));
+}
 bool led_init(void)
 {
 	int ret;
@@ -107,6 +135,7 @@ bool led_init(void)
 
 	if (!gpio_is_ready_dt(&custom_led))
 	{
+		LOG_ERR("Custom led not ready");
 		return 0;
 	}
 	// if (!gpio_is_ready_dt(&custom_button))
@@ -117,6 +146,7 @@ bool led_init(void)
 	ret = gpio_pin_configure_dt(&custom_led, GPIO_OUTPUT_ACTIVE);
 	if (ret < 0)
 	{
+		LOG_ERR("Custom led not ready (err %d)", ret);
 		return 0;
 	}
 	// ret = gpio_pin_configure_dt(&custom_button, GPIO_INT_EDGE_TO_ACTIVE);
@@ -154,11 +184,11 @@ int main(void)
 	__ASSERT(device_is_ready(dev), "Device %s is not ready", dev->name);
 	printk("device is %p, name is %s\n", dev, dev->name);
 
-
-	device_is_ready(custom_led.port);
+	led_init();
+	// device_is_ready(custom_led.port);
 	// device_is_ready(custom_button.port);
 
-	gpio_pin_configure_dt(&custom_led, GPIO_OUTPUT_ACTIVE);
+	// gpio_pin_configure_dt(&custom_led, GPIO_OUTPUT_ACTIVE);
 	// gpio_pin_configure_dt(&custom_button, GPIO_INPUT);
 	
 	// gpio_pin_interrupt_configure_dt(&custom_button, GPIO_INT_EDGE_TO_ACTIVE);
@@ -178,6 +208,7 @@ int main(void)
 		return -1;
 	}
 	LOG_INF("Bluetooth initialized\n");
+	bt_conn_cb_register(&connection_callbacks);
 
 	err = bt_le_adv_start(adv_param, ad, ARRAY_SIZE(ad), NULL ,0);
 	if (err)
@@ -186,7 +217,6 @@ int main(void)
 		return -1;
 	}
 	LOG_INF("Advertising successfully started\n");
-	bt_conn_cb_register(&connection_callbacks);
 
 	while (1)
 	{
@@ -207,6 +237,7 @@ int main(void)
 		}
 		adv_sensor_data.humidity = humidity_value.val1 * 100 + humidity_value.val2;
 		adv_sensor_data.temperature = temp_value.val1 * 100 + temp_value.val2;
+		my_lbs_send_temp_notify((uint32_t)adv_sensor_data.temperature);
 		printk("temp: %d.%d °C \t humidity is %d.%d%% \n", temp_value.val1,
 					  temp_value.val2,humidity_value.val1, humidity_value.val2);
 		bt_le_adv_update_data(ad, ARRAY_SIZE(ad), NULL,0);
