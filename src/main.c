@@ -40,7 +40,9 @@ static struct gpio_callback button_cb_data;
 
 struct bt_conn *my_conn = NULL;
 
-static bool notify_mytemperature_enabled;
+static bool notify_temperature_enabled;
+static bool notify_humidity_enabled;
+
 
 static struct bt_gatt_indicate_params ind_params;
 
@@ -63,7 +65,6 @@ void on_connected(struct bt_conn *conn, uint8_t err)
     LOG_INF("Connected");
     my_conn = bt_conn_ref(conn);
 
-    /* STEP 3.2  Turn the connection status LED on */
 	gpio_pin_toggle_dt(&custom_led);
 	// gpio_pin_set_dt(&custom_led,1);
 }
@@ -73,7 +74,6 @@ void on_disconnected(struct bt_conn *conn, uint8_t reason)
     LOG_INF("Disconnected. Reason %d", reason);
     bt_conn_unref(my_conn);
 
-    /* STEP 3.3  Turn the connection status LED off */
 	gpio_pin_toggle_dt(&custom_led);
 	// gpio_pin_set_dt(&custom_led,0);
 
@@ -106,28 +106,44 @@ ssize_t my_read_humidity(struct bt_conn *conn,const struct bt_gatt_attr *attr, v
 }
 
 static void mylbsbc_ccc_temperature_changed(const struct bt_gatt_attr *attr,uint16_t value){
-	notify_mytemperature_enabled = (value == BT_GATT_CCC_NOTIFY);
-	LOG_INF("Notification %s", notify_mytemperature_enabled ? "enabled" : "disabled");
+	notify_temperature_enabled = (value == BT_GATT_CCC_NOTIFY);
+	LOG_INF("Temperature notification %s", notify_temperature_enabled ? "enabled" : "disabled");
 }
 
+static void mylbsbc_ccc_humidity_changed(const struct bt_gatt_attr *attr,uint16_t value){
+	notify_humidity_enabled = (value == BT_GATT_CCC_NOTIFY);
+	LOG_INF("Humidity notification %s", notify_humidity_enabled ? "enabled" : "disabled");
+}
 
 BT_GATT_SERVICE_DEFINE(
     custom_service,
 	BT_GATT_PRIMARY_SERVICE(BT_UUID_MY_SERVICE),
 	BT_GATT_CHARACTERISTIC(BT_UUID_MY_TEMPERATURE, BT_GATT_CHRC_READ|BT_GATT_CHRC_NOTIFY,BT_GATT_PERM_READ, my_read_temperature, NULL, NULL),
 	BT_GATT_CCC(mylbsbc_ccc_temperature_changed,BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
-	BT_GATT_CHARACTERISTIC(BT_UUID_MY_HUMIDITY, BT_GATT_CHRC_READ,BT_GATT_PERM_READ, my_read_humidity, NULL, NULL),
+	BT_GATT_CHARACTERISTIC(BT_UUID_MY_HUMIDITY, BT_GATT_CHRC_READ|BT_GATT_CHRC_NOTIFY,BT_GATT_PERM_READ, my_read_humidity, NULL, NULL),
+	BT_GATT_CCC(mylbsbc_ccc_humidity_changed,BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+
 );
 
 int my_lbs_send_temp_notify(uint32_t temp_value)
 {
-	if (!notify_mytemperature_enabled) {
-		LOG_ERR("notify_mytemperature_enabled is not enabled/set");
+	if (!notify_temperature_enabled) {
+		LOG_ERR("notify_temperature_enabled is not enabled/set");
 		return -EACCES;
 	}
 
 	return bt_gatt_notify(NULL, &custom_service.attrs[2],&temp_value,sizeof(temp_value));
 }
+
+int my_lbs_send_humidity_notify(uint16_t humidity_value){
+	if (!notify_humidity_enabled) {
+		LOG_ERR("notify_humidity_enabled is not enabled/set");
+		return -EACCES;
+	}
+
+	return bt_gatt_notify(NULL, &custom_service.attrs[4],&humidity_value,sizeof(humidity_value));
+}
+
 bool led_init(void)
 {
 	int ret;
@@ -238,10 +254,11 @@ int main(void)
 		adv_sensor_data.humidity = humidity_value.val1 * 100 + humidity_value.val2;
 		adv_sensor_data.temperature = temp_value.val1 * 100 + temp_value.val2;
 		my_lbs_send_temp_notify((uint32_t)adv_sensor_data.temperature);
+		my_lbs_send_humidity_notify(adv_sensor_data.humidity);
 		printk("temp: %d.%d °C \t humidity is %d.%d%% \n", temp_value.val1,
 					  temp_value.val2,humidity_value.val1, humidity_value.val2);
 		bt_le_adv_update_data(ad, ARRAY_SIZE(ad), NULL,0);
-		k_msleep(1000);
+		k_msleep(1500);
 		
 	}
 
