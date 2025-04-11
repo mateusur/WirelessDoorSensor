@@ -6,21 +6,20 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/sensor.h>
 #include "ble_service.h"
+#include "button.h"
 
 LOG_MODULE_REGISTER(WirelessDoorSensor, LOG_LEVEL_INF);
 
 #define SLEEP_TIME_MS 100
 #define CUSTOM_LED DT_ALIAS(customled)
-#define CUSTOM_BUTTON DT_ALIAS(custombutton)
 #define TEMP_SENSOR DT_ALIAS(temp)
 
 
 
 static const struct gpio_dt_spec custom_led = GPIO_DT_SPEC_GET(CUSTOM_LED, gpios);
-static const struct gpio_dt_spec custom_button = GPIO_DT_SPEC_GET(CUSTOM_BUTTON, gpios);
 const struct device *const dev = DEVICE_DT_GET(TEMP_SENSOR);
 
-static struct gpio_callback button_cb_data;
+
 
 /* STEP 2.2 - Declare the structure for your custom data  */
 typedef struct adv_sensor_data {
@@ -49,28 +48,6 @@ int led_init(void)
 	return 0;
 }
 
-int button_init(void)
-{
-	if (!gpio_is_ready_dt(&custom_button))
-	{
-		return -1;
-	}
-
-	int ret = gpio_pin_configure_dt(&custom_button, GPIO_INT_EDGE_TO_ACTIVE);
-	gpio_pin_interrupt_configure_dt(&custom_button, GPIO_INT_EDGE_TO_ACTIVE);
-	if (ret < 0)
-	{
-		return ret;
-	}
-	return 0;
-}
-
-void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
-{
-	printf("Pressed\n");
-    gpio_pin_toggle_dt(&custom_led);
-	
-}
 
 int main(void)
 {
@@ -85,9 +62,7 @@ int main(void)
 	// device_is_ready(custom_button.port);
 
 	
-	gpio_init_callback(&button_cb_data, button_pressed, BIT(custom_button.pin)); 	
-	gpio_add_callback(custom_button.port, &button_cb_data);
-	gpio_add_callback_dt(&custom_button, &button_cb_data);
+
 	int err;
 
 	ble_init();
