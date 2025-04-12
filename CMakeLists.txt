@@ -6,5 +6,7 @@ project(doorSensor)
 
 target_sources(app PRIVATE
     src/main.c
-    src/ble_service.c    
+    src/ble_service.c
+    src/button.c
+    src/LED.c    
 )

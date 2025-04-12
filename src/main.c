@@ -7,47 +7,21 @@
 #include <zephyr/drivers/sensor.h>
 #include "ble_service.h"
 #include "button.h"
+#include "LED.h"
 
 LOG_MODULE_REGISTER(WirelessDoorSensor, LOG_LEVEL_INF);
 
 #define SLEEP_TIME_MS 100
-#define CUSTOM_LED DT_ALIAS(customled)
 #define TEMP_SENSOR DT_ALIAS(temp)
 
-
-
-static const struct gpio_dt_spec custom_led = GPIO_DT_SPEC_GET(CUSTOM_LED, gpios);
 const struct device *const dev = DEVICE_DT_GET(TEMP_SENSOR);
 
-
-
-/* STEP 2.2 - Declare the structure for your custom data  */
 typedef struct adv_sensor_data {
 	int32_t temperature; 
 	uint16_t humidity; 
 } adv_sensor_data_type;
 
 static adv_sensor_data_type adv_sensor_data = { 0, 0 };
-
-int led_init(void)
-{
-	int ret;
-	bool led_state = true;
-
-	if (!gpio_is_ready_dt(&custom_led))
-	{
-		LOG_ERR("Custom led not ready");
-		return -1;
-	}
-	ret = gpio_pin_configure_dt(&custom_led, GPIO_OUTPUT_ACTIVE);
-	if (ret < 0)
-	{
-		LOG_ERR("Custom led not ready (err %d)", ret);
-		return ret;
-	}
-	return 0;
-}
-
 
 int main(void)
 {
@@ -58,10 +32,6 @@ int main(void)
 	printk("device is %p, name is %s\n", dev, dev->name);
 
 	led_init();
-	// device_is_ready(custom_led.port);
-	// device_is_ready(custom_button.port);
-
-	
 
 	int err;
 
