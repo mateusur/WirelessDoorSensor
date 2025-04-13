@@ -8,5 +8,7 @@ target_sources(app PRIVATE
     src/main.c
     src/ble_service.c
     src/button.c
-    src/LED.c    
+    src/LED.c
+    src/sht_sensor.c
+        
 )
